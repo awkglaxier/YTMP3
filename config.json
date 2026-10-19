@@ -1,0 +1,11 @@
+{
+  "port": 5577,
+  "host": "127.0.0.1",
+  "ytDlpPath": "yt-dlp.exe",
+  "ffmpegPath": "",
+  "downloadDir": "downloads",
+  "maxConcurrent": 3,
+  "audioQuality": "0",
+  "filenameTemplate": "%(title)s.%(ext)s",
+  "embedMetadata": true
+}

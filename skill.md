@@ -1,0 +1,1 @@
+C:\Glaxier\skills\glaxier-solo-leveling

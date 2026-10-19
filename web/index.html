@@ -1,0 +1,174 @@
+<!DOCTYPE html>
+<!--
+  ไฟล์: web/index.html
+  คำอธิบาย: หน้าเว็บ AwokenYT — วางลิ้ง YouTube หลายลิ้งแล้วสั่งโหลด mp3 พร้อมกัน
+  ใช้เปิดได้ทั้งแบบดับเบิลคลิกไฟล์นี้ตรงๆ (file://) หรือผ่าน http://localhost:5577
+  ธีม: dark ดำ-เทา + สีเด่น teal — สไตล์เดียวกับ ui-style guide
+-->
+<html lang="th">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>AwokenYT — YouTube → MP3</title>
+
+  <!-- Noto Sans Thai (Google Fonts) -->
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+Thai:wght@300;400;500;600;700&display=swap" rel="stylesheet" />
+
+  <!-- Iconify -->
+  <script src="https://code.iconify.design/iconify-icon/1.0.7/iconify-icon.min.js"></script>
+
+  <!-- Vue 3 -->
+  <script src="https://unpkg.com/vue@3/dist/vue.global.prod.js"></script>
+
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+  <div id="app" v-cloak>
+    <div class="page">
+
+      <!-- หัวเว็บ + สถานะ yt-dlp -->
+      <header class="app-head">
+        <div class="brand">
+          <div class="brand-icon"><iconify-icon icon="mdi:youtube"></iconify-icon></div>
+          <div>
+            <h1>AwokenYT <span>→ MP3</span></h1>
+            <p>วางลิ้ง YouTube หลายลิ้งในครั้งเดียว โหลดพร้อมกันได้เลย</p>
+          </div>
+        </div>
+        <div class="head-badges">
+          <span class="badge" :class="ytDlpReady ? 'badge-green' : 'badge-danger'">
+            <iconify-icon :icon="ytDlpReady ? 'mdi:check-circle' : 'mdi:alert'"></iconify-icon>
+            {{ ytDlpReady ? 'yt-dlp v' + health.ytDlp : 'ไม่พบ yt-dlp' }}
+          </span>
+          <span class="badge" :class="health.ffmpeg ? 'badge-green' : 'badge-danger'">
+            <iconify-icon icon="mdi:waveform"></iconify-icon>
+            {{ health.ffmpeg ? 'ffmpeg พร้อม' : 'ไม่พบ ffmpeg' }}
+          </span>
+        </div>
+      </header>
+
+      <!-- แถบเตือนเมื่อเชื่อมต่อ server ไม่ได้ -->
+      <div class="conn-warn" v-if="!connected">
+        <iconify-icon icon="mdi:plug-off"></iconify-icon>
+        เชื่อมต่อ server ไม่ได้ — ดับเบิลคลิก <b>server.bat</b> ที่โฟลเดอร์โปรแกรมก่อน
+      </div>
+
+      <!-- การ์ดวางลิ้ง -->
+      <section class="card paste-card">
+        <div class="field">
+          <label>ลิ้ง YouTube — บรรทัดละ 1 ลิ้ง หรือวางมารวมกันก็ได้ ระบบหยิบลิ้งออกมาให้เอง</label>
+          <div class="input-wrap textarea-wrap">
+            <iconify-icon icon="mdi:link-variant"></iconify-icon>
+            <textarea
+              v-model="input"
+              placeholder="https://www.youtube.com/watch?v=xxxx&#10;https://youtu.be/yyyy&#10;https://www.youtube.com/watch?v=zzzz"
+              spellcheck="false"></textarea>
+          </div>
+        </div>
+        <div class="paste-foot">
+          <span class="badge" :class="links.length ? 'badge-accent' : ''">
+            <iconify-icon icon="mdi:counter"></iconify-icon>
+            ตรวจพบ {{ links.length }} ลิ้ง
+          </span>
+          <span class="badge">
+            <iconify-icon icon="mdi:download-multiple"></iconify-icon>
+            โหลดพร้อมกันสูงสุด {{ health.maxConcurrent || '-' }} ลิ้ง
+          </span>
+          <div class="spacer"></div>
+          <button class="btn btn-ghost" @click="clearInput" :disabled="!input">
+            <iconify-icon icon="mdi:eraser"></iconify-icon> ล้างข้อความ
+          </button>
+          <button class="btn btn-primary" @click="startAll" :disabled="!links.length || starting">
+            <iconify-icon icon="mdi:download"></iconify-icon> เริ่มโหลดทั้งหมด
+          </button>
+        </div>
+      </section>
+
+      <!-- รายการโหลด -->
+      <section class="card list-card">
+        <div class="list-head">
+          <div class="list-title">
+            <iconify-icon icon="mdi:playlist-download"></iconify-icon>
+            รายการโหลด <span class="dim">({{ jobs.length }})</span>
+          </div>
+          <div class="list-actions">
+            <button class="btn btn-ghost btn-sm" @click="openFolder">
+              <iconify-icon icon="mdi:folder-open-outline"></iconify-icon> เปิดโฟลเดอร์
+            </button>
+            <button class="btn btn-danger btn-sm" @click="cancelAll" :disabled="!busyCount">
+              <iconify-icon icon="mdi:stop-circle-outline"></iconify-icon> ยกเลิกทั้งหมด
+            </button>
+            <button class="btn btn-ghost btn-sm" @click="clearFinished" :disabled="!finishedCount">
+              <iconify-icon icon="mdi:notification-clear-all"></iconify-icon> ล้างรายการเสร็จ
+            </button>
+          </div>
+        </div>
+
+        <div class="out-dir" v-if="health.downloadDir">
+          <iconify-icon icon="mdi:folder-outline"></iconify-icon>
+          บันทึกไฟล์ที่: <span class="mono">{{ health.downloadDir }}</span>
+        </div>
+
+        <div class="empty" v-if="!jobs.length">
+          <iconify-icon icon="mdi:youtube"></iconify-icon>
+          <p>ยังไม่มีรายการ — วางลิ้งด้านบนแล้วกด "เริ่มโหลดทั้งหมด"</p>
+        </div>
+
+        <ul class="job-list" v-else>
+          <li v-for="job in jobs" :key="job.id" class="job" :class="'job-' + job.status">
+            <div class="job-status">
+              <iconify-icon :icon="statusIcon(job)" :class="{ spin: job.status === 'converting' }"></iconify-icon>
+            </div>
+            <div class="job-main">
+              <div class="job-top">
+                <span class="job-title" :title="job.url">{{ job.title || job.url }}</span>
+                <span class="badge" :class="statusClass(job)">{{ statusText(job) }}</span>
+              </div>
+              <div class="progress-track" v-if="showProgress(job)">
+                <div class="progress-fill" :class="{ pulse: job.status === 'converting' }" :style="{ width: (job.percent || 0) + '%' }"></div>
+              </div>
+              <div class="job-meta" :class="{ 'meta-error': job.status === 'error' }">
+                <template v-if="job.status === 'downloading'">
+                  {{ job.percent ? job.percent.toFixed(1) + '%' : 'กำลังเริ่ม...' }}
+                  <span v-if="job.speed"> · {{ job.speed }}</span>
+                  <span v-if="job.eta"> · ETA {{ job.eta }}</span>
+                  <span v-if="job.size"> · {{ job.size }}</span>
+                </template>
+                <template v-else-if="job.status === 'converting'">แปลงเป็น mp3 อยู่...</template>
+                <template v-else-if="job.status === 'done'"><span class="mono">{{ fileName(job) }}</span></template>
+                <template v-else-if="job.status === 'error'">{{ job.error }}</template>
+                <template v-else-if="job.status === 'canceled'">ยกเลิกแล้ว</template>
+                <template v-else>อยู่ในคิว...</template>
+              </div>
+            </div>
+            <div class="job-actions">
+              <button class="icon-btn" v-if="!isTerminal(job)" @click="cancel(job.id)" title="ยกเลิกรายการนี้">
+                <iconify-icon icon="mdi:close"></iconify-icon>
+              </button>
+              <button class="icon-btn" v-if="job.status === 'done'" @click="reveal(job.id)" title="แสดงไฟล์ในโฟลเดอร์">
+                <iconify-icon icon="mdi:open-in-app"></iconify-icon>
+              </button>
+            </div>
+          </li>
+        </ul>
+      </section>
+
+      <footer class="foot">ใช้ส่วนตัวบนเครื่องตัวเอง · yt-dlp {{ ytDlpReady ? health.ytDlp : 'ไม่พบ' }} · โหลดพร้อมกัน {{ health.maxConcurrent || '-' }}</footer>
+    </div>
+
+    <!-- Toast แจ้งเตือน -->
+    <div class="toasts">
+      <transition-group name="toast">
+        <div v-for="t in toasts" :key="t.id" class="toast-item" :class="'toast-' + t.type">
+          <iconify-icon :icon="t.type === 'error' ? 'mdi:alert-circle' : 'mdi:check-circle'"></iconify-icon>
+          {{ t.msg }}
+        </div>
+      </transition-group>
+    </div>
+  </div>
+
+  <script src="app.js"></script>
+</body>
+</html>
